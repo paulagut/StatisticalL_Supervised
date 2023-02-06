@@ -1,0 +1,951 @@
+---
+title: "SECOND HOMEWORK: Supervised learning"
+subtitle: "Bachelor in Data Science and Engineering"
+author: "Paula Gutierrez Arroyo, G97"
+date: "November, 3rd 2022"
+output: 
+  html_document: 
+    css: Levels_Fyi_Salary_Data.csv
+    theme: cerulean
+    highlight: tango
+    number_sections: no
+    toc: no
+    toc_depth: 1
+---
+```{r global_options, include=T, echo = F}
+knitr::opts_chunk$set(echo = T, warning=FALSE, message=FALSE)
+```
+## FIRST SEP: loading the libraries
+Firstly, we clean the workspace and load all of the libraries we are going to need for the supervised learning.
+
+```{r}
+rm(list = ls())
+
+library(tidyverse)
+library(naniar)
+library(mice)
+library(VIM)
+library(ggplot2)
+library(GGally)
+library(Amelia)
+library(hexbin)
+library(RColorBrewer)
+library(MASS)
+library(caret)
+library(pROC)
+library(naivebayes)
+library(e1071)
+library(caret)
+library(glmnet)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(gbm)
+library(leaps)
+library(leaflet)
+library(olsrr)
+library(mltools)
+library(jtools)
+library(elasticnet)
+library(glmnet)
+library(class)
+library(parallel)
+
+```
+
+# Introduction
+```{r}
+setwd("~/UC3M/2nd year/statistical learning/archive2")
+
+data = read.csv("Levels_Fyi_Salary_Data.csv") 
+head(data)
+
+```
+
+Our dataset for this project,**Levels_Fyi_Salary_Data**, is about the salary records of top companies. Basically, we have a lot of variables that are in those companies' datasets where we can see that is not only up to ourselves to have a better salary, it has a lot of other factors that play the part, such as our soft skills, if our level of studies, etc.
+You can download it from this link: [click here](https://www.kaggle.com/datasets/jackogozaly/data-science-and-stem-salaries)
+
+Our goal in this project is to predict the total salary
+
+```{r}
+head(data)
+```
+## The database:
+The features in the database are the following (they are mostly self-explanatory):
+* timestamp: the exact time the data was stored in date format.
+
+* company: the name of the company.
+
+* level: the scale of importance of the job.
+
+* title: the position a certain person has in the team/company.
+
+* totalyearlycompensation: total salary in dollars per year.
+
+* location: where the person works.
+
+* yearsofexperience: the years of experience the person has.
+
+* yearsatcompany: the years at the company the person has been in.
+
+* tag: specialization of the person's work.
+
+* basesalary: remuneration in dollars and anually without variables.
+
+* stockgrantvalue: he price an employee must pay the company for shares purchased when exercising option.
+
+* bonus: variable remuneration that a person may have.
+
+* gender: the gender of the person.
+
+* otherdetails: extra information.
+
+* cityid: the id of the city where the person works at.
+
+* Masters_degree: number of master's degrees per person.
+
+* Bachelors_degree: number of bachelor's degrees per person.
+
+* Doctorate_degree: number of doctorates per person.
+
+* Highschool: if highschool was the person's last formative expercience.
+
+* Race_Asian: 1 for Asian, 0 if not.
+
+* Race_White: 1 for White, 0 if not.
+
+* Race_Black: 1 for black, 0 if not.
+
+* Race_Hispanic: 1 for hispanic, 0 if not.
+
+* Race_Two_or_more: 1 if they are mixed race, 0 if not.
+
+* Race: categorical variable to indicate the person's race (summing up Race_Asian, Race_Black, etc).
+
+* Education: categorical variable to indicate the level of education or last formative experience (summing up Highschool, Bachelors_degree, etc).
+
+```{r}
+str(data)
+```
+
+At first glance in the dataset we can see that we have originally a lot of variables in character format. We will have to change them either to numerical or to factor in order to be able to do the supervised learning properly.
+
+Moreover, there are a lot of variables that will not be necessary to us, which we will have to delete completely because of the lack of information it provides.
+
+Now, we remove all integers (0s and 1s) from race and study levels as we will only keep one that merges them in factor. 
+
+```{r}
+data = dplyr::select(data,-otherdetails, -cityid,-rowNumber, -Race_Asian,
+                     -Race_White, -Race_Two_Or_More, -Race_Black,-Race_Hispanic,
+                     -Masters_Degree, -Bachelors_Degree, -Doctorate_Degree,
+                     -Highschool, -dmaid, -Some_College)
+
+
+```
+
+Up next, we are going to check the uniqueness of the variables to know if it is sensible to change them to factor:
+```{r}
+length(unique(data$company))
+length(unique(data$tag))
+length(unique(data$level))
+
+```
+
+We discard changing company, tag and level to factor. Having 1633, 3062 and 2926, respectively. 
+So, we are going to remove them, too, since they do not provide relevant information:
+
+```{r}
+
+data = dplyr::select(data,-tag, -level, -company, -timestamp)
+
+```
+
+Perfect! Now that this is done, let's get to:
+
+## The data preprocessing:
+
+First, how many NAs do we have?
+
+```{r}
+sum(is.na(data))
+```
+
+Well...92027, a lot. But, we have to know where they lie, to further analyze which is the best way to get rid of them in our dataset. We are going to do so graphically.
+```{r}
+hist(rowMeans(is.na(data)))
+
+```
+
+From what we can look at, our missing values are not distributed in our data, but they are all in a few variables, let's see which ones:
+
+```{r}
+aggr(data, numbers = TRUE, sortVars = TRUE, labels = names(data),
+     cex.axis = .7, gap = 1, ylab= c('Missing data','Pattern'))
+
+```
+
+```{r}
+gg_miss_upset(data)
+
+```
+
+The upset plot shows the combination of missings, by default choosing the 5 variables with the most missing values, and then orders them by the size of the missing values in that set.
+Race has the most missing values, followed by Education and Gender.
+We have a lot of missing values so we have to consider how to remove them properly.
+- We may use mice to predict or imputation by the median to predict the NAs.
+- We have not studied the r^2 yet so we are not going to use regression.
+
+Mice is very power-consuming due to the amount of observations we have.
+So, after some consideration, we state that the best way is to simply omit them. If we introduced the median of the variable, we would be introducing a lot of bias in the dataset and we want to be fair, and we still have a lot of variables to work with!
+
+```{r}
+data2 = na.omit(data)
+sum(is.na(data2))
+missmap(data2, main = 'Missing Map', col = c('#168AAD', '#184e77'))
+```
+
+## Visualization of our dataset:
+
+```{r}
+ggplot(data2, aes(x=Education))+
+  geom_bar(fill = "#58A4B0")+
+  geom_text(stat='count', aes(label=..count..), vjust=-1)+
+  ggtitle("Major Distribution")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  xlab("title")
+```
+
+Most of the people have done a bachelor's degree, but the Master's degree is still a close second.
+
+```{r}
+ggplot(data2, aes(x=log10(basesalary), group=Race, fill=Race)) +
+  geom_density(adjust=1.5, alpha = 0.5) +
+  theme_bw() + facet_wrap(~Race) +xlab("Base salaries depending on race")
+
+
+```
+
+We see there is no relevant distortion depending on race, probably due to the equality measures that tech companies are starting to implement.
+
+
+```{r}
+ggplot(data2,aes(x=title,fill = title))+
+  geom_bar()+
+  geom_text(stat='count', aes(label=..count..), vjust=-1,check_overlap = TRUE)+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(axis.text.x = element_text(angle = 90, hjust =1, vjust = 0.5))+
+  xlab("Titles")+
+  ylab("Count")
+```
+
+What we have the most is, by far, software engineers.
+
+```{r}
+ggplot(data2, aes(x = gender, y = basesalary))+geom_violin(alpha = 0.5, adjust=2, fill = 'mediumorchid') +
+  stat_summary(fun="mean", geom="point", shape=23, size=3, fill="blue")
+
+```
+
+We can see that there is not that huge different salaries between genders, still, the males still get  a little higher wereas others get a little lower. (it also depends on the number of males, females and others we may have).
+
+```{r}
+ggplot(data2, aes(x = basesalary, y = stockgrantvalue)) +geom_smooth(colour = 'steelblue')
+
+```
+
+There is a shift in the medium-high salaries in which the stock grant falls suddenly...not as we expected.
+So, we are going to make a copy of our dataset in numeric format:
+
+```{r}
+data_num = data2
+data_num$title = NULL
+data_num$totalyearlycompensation = as.numeric(data_num$totalyearlycompensation)
+data_num$location = NULL
+data_num$gender = as.numeric(as.factor(data_num$gender))
+data_num$Race = as.numeric(as.factor(data_num$Race))
+data_num$Education = as.numeric(as.factor(data_num$Education))
+```
+```{r}
+ggcorr(data_num, label = T)
+```
+
+We have a positive correlation in general, but is low. The most correlated variables are totalyearlycompensation with yearsatcompany and totalyearlycompensation and basesalary. We would have expected other variables to have stronger correlation, too. 
+
+Let us see the variables that have the most correlation with totalyearlycompensation:
+```{r}
+corr_compensation = sort(cor(data_num)["totalyearlycompensation",], decreasing = T)
+corr=data.frame(corr_compensation)
+ggplot(corr,aes(x = row.names(corr), y = corr_compensation)) + 
+  geom_bar(stat = "identity", fill = "#aC5E99") + 
+  scale_x_discrete(limits= row.names(corr)) +
+  labs(x = "", y = "TotalYearlyCompensation", title = "Correlations") + 
+  theme(plot.title = element_text(hjust = 0, size = rel(1.5)),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**Outliers**
+We are going to check for them superficially, because they are extreme values far from the others, which may affect our outcomes.
+
+```{r}
+QI = quantile(data_num$totalyearlycompensation, 0.25)
+QS = quantile(data_num$totalyearlycompensation, 0.75)
+IQR = QS-QI
+
+sum(data_num$totalyearlycompensation < QI - 1.5*IQR | data_num$totalyearlycompensation > QS + 1.5*IQR)
+
+```
+
+It is a low number but let's see it graphically:
+
+
+```{r}
+x = log10(data$totalyearlycompensation)
+y = data$yearsatcompany
+# Make the plot
+bin=hexbin(x, y, xbins=40)
+my_colors=colorRampPalette(rev(brewer.pal(11,'Spectral')))
+plot(bin, main="" , colramp=my_colors , legend=F )
+
+```
+
+We have less than a 5% of outliers (the small dot on top). In the hexagram we can see the spectrum of salaries depending on the experience.
+
+# Data Splitting
+
+We are going to divide the totalyearlycompensation in three:
+
+* High
+* Medium
+* Low
+
+```{r}
+data3 = data_num
+data3$totalyearlycompensation = factor(ifelse(data2$totalyearlycompensation == QI, "Low", ifelse(data2$totalyearlycompensation >= QS, "High", "Average")))
+
+levels(data3$totalyearlycompensation)
+
+```
+
+Now, we are going to split our data into train and test set.Were the most information is in the training set. (80%)
+
+```{r}
+spl = createDataPartition(data3$totalyearlycompensation, p = 0.8, list = FALSE) 
+comp_train = data3[spl,]
+comp_test = data3[-spl,]
+str(comp_train)
+```
+
+### Interpretation
+
+```{r}
+ggplot(comp_train, aes(x=yearsofexperience , fill= totalyearlycompensation)) +
+  geom_density(adjust=1.5, alpha=.4) +
+  theme_light()
+
+```
+
+There is not much difference, but the most people like in the Average spectrum of the totalyearlycompensation, some people that have more years of experience, clearly have a high compensation, but some do not. This could be due to the different positions that a company has.
+
+## LDA 
+
+LDA (Linear Discriminant Analysis) is a generalisation of the Fisher's Linear Discriminant and it is a dimensionality reduction technique used for supervised classification problems (our case). 
+
+```{r}
+lda.model = lda(totalyearlycompensation ~ ., data=comp_train)
+lda.model
+probability = predict(lda.model, newdata=comp_test)$posterior
+head(probability)
+
+```
+
+```{r}
+prediction = predict(lda.model, newdata=comp_test)$class
+head(prediction)
+
+```
+
+```{r}
+roc.lda = roc(comp_test$totalyearlycompensation,probability[,2])
+auc(roc.lda)
+plot.roc(comp_test$totalyearlycompensation,probability[,2], print.auc = TRUE,  auc.polygon=TRUE)
+
+```
+
+The area under the curve is 0.998, the maximum is 1.
+The ROC curve shows the true positives vs the false positives in different thresholds.
+
+Let's check the performance:
+
+```{r}
+confusionMatrix(prediction, comp_test$totalyearlycompensation)$table
+
+```
+
+```{r}
+confusionMatrix(prediction, comp_test$totalyearlycompensation)$overall[1]
+```
+
+We have a little bit of overfitting but it is a good start.
+
+## QDA
+QDA (Quadratic Discriminant Analysis) is pretty similar to the Linear one but it assumes that it is following a Gaussian distribution.
+
+```{r}
+qda.model = qda(totalyearlycompensation ~ ., data=comp_train, prior=c(1/6, 1/3, 1/2))
+qda.model
+
+```
+
+```{r}
+prediction = predict(qda.model, newdata=comp_test)$class
+confusionMatrix(prediction, comp_test$totalyearlycompensation)$table
+
+```
+
+```{r}
+confusionMatrix(prediction, comp_test$totalyearlycompensation)$overall[1]
+
+```
+
+It performs better than the LDA.
+
+# The Benchamark Model:
+
+The benchmark model is the process of comparing our result to existing methods.It predicts the most likely to be the outcome of our observations. It has a lower performance than LDA and QDA but it is out of the range of overfitting and better balanced.
+We can see we have a simple model with 74%, we could change the levels to two, but since we are already losing information, we are going to leave this like this.
+
+```{r}
+table(comp_train$totalyearlycompensation)
+
+obs <- max(table(comp_test$totalyearlycompensation))
+```
+
+```{r}
+obs/nrow(comp_test)
+
+```
+
+We may also compute it this way:
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 5,
+                     classProbs = TRUE, 
+                     verboseIter=T)
+
+lrFit <- train(totalyearlycompensation ~ ., 
+               method = "glmnet",
+               tuneGrid = expand.grid(alpha = seq(0, 1, 0.1), lambda = seq(0, .1, 0.02)),
+               metric = "Kappa",
+               data = comp_train,
+               preProcess = c("center", "scale"),
+               trControl = ctrl)
+print(lrFit)
+```
+
+```{r}
+lrPred = predict(lrFit, comp_test)
+confusionMatrix(lrPred, comp_test$totalyearlycompensation)
+```
+
+```{r}
+#VARIABLE IMPORTANCE
+lr_imp <- varImp(lrFit, scale = F)
+plot(lr_imp, scales = list(y = list(cex = .95)))
+```
+
+# Naïve-Bayes
+## Standard Version (Gaussian)
+
+The Naïve-Bayes Classification is a family of simple probabilistic classifiers based on applying Bayes's Theorem with strong independence.
+
+```{r}
+spl = sample(1:nrow(data3), 12000)
+train_1 = data_num[spl,]
+test_1 = data_num[-spl,]
+train_2 = data3[spl,]
+test_2 = data3[-spl,]
+
+```
+
+
+```{r}
+data_num$totalyearlycompensation = as.factor(data_num$totalyearlycompensation)
+index=createDataPartition(data_num$totalyearlycompensation,p=0.8,list=FALSE)
+x_train=data_num[index,]
+x_test=data_num[-index,]
+y_train=data_num[index,]$totalyearlycompensation
+y_test=data_num[-index,]$totalyearlycompensation
+
+NB.fit <- naiveBayes(as.matrix(x_train), y_train, laplace = 1)
+# laplace controls smoothing of probabilities
+NB.pred <- predict(NB.fit, as.matrix(x_test))
+
+```
+
+```{r}
+confusionMatrix(NB.pred,y_test)
+```
+
+We could do it much simpler and easier to understand this way:
+
+```{r}
+na1 = naiveBayes(totalyearlycompensation ~ ., data = train_2)
+pred.na1 = predict(na1, test_2)
+confusionMatrix(test_2$totalyearlycompensation, pred.na1)
+```
+
+We still prefer the Benchmark model. This one predicts that our variables are independent, which is not enterly true. It has weaknesses. If instead of accuracy we take other parameters, our model is not that unbalanced.
+
+#Logistic Regression
+
+The logistic regression models the probability of a discrete outcome by using a logistic function, which is the cumulative distribution function of the logistic distribution. 
+We assume the mean of error is zero. We use our numerical data:
+
+```{r}
+i_t = createDataPartition(data2$totalyearlycompensation, p = 0.75, list = FALSE)
+train_reg1 = data2[ i_t,]
+test_reg1 = data2[-i_t,]
+ggcorr(data_num, label = T)
+```
+
+The correlation does not change much.
+
+```{r}
+logit.model <- glm(totalyearlycompensation ~ ., family=binomial(link='logit'), data=train_2)
+summary(logit.model)
+```
+
+```{r}
+probability <- predict(logit.model,newdata=test_2, type='response')
+head(probability)
+```
+
+```{r}
+prediction <- as.factor(ifelse(probability > 0.5,"Bad","Good"))
+head(prediction)
+```
+
+But, if we use our data2, we get basically the same correlation with less variables:
+
+```{r}
+i_t = createDataPartition(data2$totalyearlycompensation, p = 0.75, list = FALSE)
+train_reg1 = data2[ i_t,]
+test_reg1 = data2[-i_t,]
+ggcorr(data_num, label = T)
+
+```
+
+
+# Machine learning tools
+## Decision trees:
+
+Decision trees are a support tool with the aspect of a tree, thus the name. It is pretty visual and let us get more insight into our model firsthand.
+
+```{r}
+control = rpart.control(minsplit = 30, maxdepth = 10, cp=0.01)
+model = totalyearlycompensation ~.
+dtFit <- rpart(model, data=comp_train, method = "class", control = control)
+summary(dtFit)
+
+```
+
+```{r}
+rpart.plot(dtFit, digits=3)
+
+```
+
+Now, changing the minsplit, maxdepth and cp:
+```{r}
+control = rpart.control(minsplit = 40, maxdepth = 12, cp=0.001)
+dtFit <- rpart(model, data=comp_train, method = "class", control = control)
+
+rpart.plot(dtFit, digits = 3)
+```
+
+## With caret:
+
+```{r}
+caret.fit <- train(model, 
+                   data = comp_train, 
+                   method = "rpart",
+                   control=rpart.control(minsplit = 40, maxdepth = 12),
+                   trControl = trainControl(method = "cv", number = 5),
+                   tuneLength=10)
+caret.fit
+```
+
+```{r}
+rpart.plot(caret.fit$finalModel)
+```
+
+Similar to the previous one, but now we can get more insight into the parameters, so far so good.
+
+# Random Forest
+The random forest is an ensemble learning method for classification, regression and others. It consists of a lot of decision trees (therefore the name forest). It builds it randomly each tree and the accuracy is usually better than an individual tree.
+We will implement cross-validation to ensure all of our data will be used.
+
+```{r}
+spl = sample(1:nrow(data3), 7000)
+train_1 = data_num[spl,]
+test_1 = data_num[-spl,]
+train_2 = data3[spl,]
+test_2 = data3[-spl,]
+
+ctrl = trainControl( method = 'cv', number = 5)
+#rf1 = train(totalyearlycompensation~., data = train_2, method = 'rf', 
+#           trControl = ctrl, tuneLength = 9)
+
+#plot(varImp(rf1))
+
+```
+
+We prepare our data to have less overfitting and a better balance.The simpler we make it, the better our results will be.
+
+```{r}
+trees = train(totalyearlycompensation~., data = train_2, method = 'rpart', 
+              trControl = ctrl,
+              tuneLength = 20)
+pred = predict(trees, test_2);confusionMatrix(table(test_2[,"totalyearlycompensation"],pred))
+
+```
+
+We have a lower accuracy for the trees due to the change our data splits, so, according to the model this is our best tree: 
+
+```{r}
+print(trees);plot(trees);trees$bestTune
+
+```
+
+
+```{r}
+tree1 = rpart(train_2, maxdepth = 5, cp = 0.005)
+rpart.plot(tree1,fallen.leaves = T)
+
+```
+
+```{r}
+plot(varImp(trees))
+
+```
+
+The most important variable to classify is the base salary, followed closely by the stock grant value. This makes sense because the base salary is an important factor to a person's job and the grant value, too. It is also followed by the bonus, which also makes sense because the bonus is kind of important when seeing a person's work. 
+
+# Gradient Boosting
+
+Gradient Boosting relies on the intuition that the next best model combined with previous ones, will minimize the overall prediction error. This process is the one that takes the most time. 
+However, it is better than boosting (its smaller brother), since it avoids overfitting better.
+
+```{r}
+GBM.train <- gbm(ifelse(train_2$totalyearlycompensation=="Low",0,1) ~.,
+                 data=train_2, distribution= "bernoulli",n.trees=250,shrinkage = 0.01,interaction.depth=2,n.minobsinnode = 8)
+
+```
+
+```{r}
+#xgb_grid = expand.grid(
+#  nrounds = c(500,1000),
+#  eta = c(0.01, 0.001), # c(0.01,0.05,0.1)
+#  max_depth = c(2, 4, 6),
+#  gamma = 1,
+#  colsample_bytree = c(0.2, 0.4),
+#  min_child_weight = c(1,5,
+#  subsample = 1
+#)
+```
+
+```{r}
+#xgb1 = train(totalyearlycompensation ~ .,  data=train_2,
+#             trControl = ctrl,
+#             maximize = F,
+#             tuneGrid = xgb_grid,
+#             preProcess = c("center", "scale"),
+#             method = "xgbTree"
+#)
+
+```
+
+```{r}
+#pred3 <- predict(xgb1, #test_2);confusionMatrix(table(test_2[,"totalyearlycompensation"],pred3))
+```
+
+```{r}
+#xgb_imp <- varImp(xgb1, scale = F)
+#plot(xgb_imp, scales = list(y = list(cex = .95)))
+```
+
+# KNN
+K-Nearest Neighbour it uses the proximity to make classifications or predictions of a group of points near a single one.
+We have to scale the data:
+
+```{r}
+data3 = data_num;
+data3$totalyearlycompensation = NULL
+data3 = scale(data3)
+
+```
+
+```{r}
+data3 = cbind(data3, data_num[,"totalyearlycompensation"])
+data3 = as.data.frame(data3)
+colnames(data3)[9] = 'totalyearlycompensation'
+data3[,9] = as.factor(data3[,9])
+data3$totalyearlycompensation = factor(ifelse(data2$totalyearlycompensation == QI, "Low", ifelse(data2$totalyearlycompensation >= QS, "High", "Average")))
+
+```
+
+
+```{r}
+r.ids  = createDataPartition(data3$totalyearlycompensation, p = 0.5, list = F)
+traink = data3[r.ids, ]; temp = data3[-r.ids, ]
+v.ids = createDataPartition(temp$totalyearlycompensation, p = 0.5, list = F)
+val = temp[v.ids, ]; testk = temp[-v.ids, ]
+
+k1 = knn(traink[ ,1:8], val[ ,1:8], traink[,9], k = 1)
+acc = sum(k1 == val$totalyearlycompensation)/length(val$totalyearlycompensation)
+confusionMatrix(table(val$totalyearlycompensation, k1))$byClass
+
+```
+
+We have better parameters, let's complicate it a little more and make it even better: 
+
+```{r}
+k_grid = expand.grid(k = seq(1,59, 2))
+
+for (i in 1:nrow(k_grid)){
+  k = knn(traink[ ,1:8], val[ ,1:8], traink[,9], k = k_grid$k[i])
+  k_grid$acc[i] = sum(k == val$totalyearlycompensation)/length(val$totalyearlycompensation)
+}
+
+plot(x = k_grid$k, y = k_grid$acc, xlab="K- Value",ylab="Accuracy")
+
+```
+
+The bigger the k value, the lower the accuracy.
+
+# The SVM
+
+The Suport Vector Machine it correlates vector in an space of big dimensions
+
+```{r}
+t.ids = createDataPartition(data3$totalyearlycompensation, p = 0.7, list = F)
+train_4= data3[t.ids,]
+test_4 = data3[-t.ids,]
+s1 = svm(totalyearlycompensation~.,data = train_4)
+pred.s = predict(s1, test_4)
+```
+
+```{r}
+confusionMatrix(table(test_4$totalyearlycompensation, pred.s))
+```
+
+```{r}
+svmlinear = train(totalyearlycompensation ~., data = train_4, method = "svmLinear", trControl = ctrl,  preProcess = c("center","scale"), tuneGrid = expand.grid(C = seq(0, 1, length = 20)))
+pred_svmlinear = predict(svmlinear, test_4)
+```
+
+```{r}
+confusionMatrix(table(test_4$totalyearlycompensation, pred_svmlinear))
+```
+
+```{r}
+plot(svmlinear)
+```
+
+Let's try the radial one instead of the linear:
+
+```{r}
+svmradial = train(totalyearlycompensation ~., data = train_4, method = "svmRadial", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 10)
+
+predictionsvmradial = predict(svmradial, test_4)
+confusionMatrix(table(test_4$totalyearlycompensation, predictionsvmradial))
+```
+
+```{r}
+plot(svmradial)
+svmradial$bestTune
+```
+
+Out best sigma is 0.13 aprox.
+Both SVMs have similar performance but in other cases, it would be better to use the radial one.
+
+## Simple Model
+
+
+```{r}
+test_reg1$totalyearlycompensation = as.numeric(test_reg1$totalyearlycompensation)
+
+msl = lm(formula = totalyearlycompensation ~ bonus, data = train_reg1)
+perfsl = predict(msl, newdata=test_reg1)
+cor(test_reg1$totalyearlycompensation, perfsl)^2
+
+```
+0.310922
+
+If we try to make another model, the accuracy does not improve or not signficantly:
+
+```{r}
+msl2 = lm(formula = totalyearlycompensation ~ I(bonus^2), data = train_reg1)
+prsl2 = sqrt(predict(msl2, newdata=test_reg1))
+cor(test_reg1$totalyearlycompensation, prsl2)^2
+```
+It changes a bit.
+
+## Multivariate model
+```{r}
+msm = lm(totalyearlycompensation ~ I(bonus^2) + I(basesalary^2) + I(stockgrantvalue^2), data=train_reg1)
+#summary(msm)
+prsm = sqrt(predict(msm, newdata=test_reg1))
+cor(test_reg1$totalyearlycompensation, prsm)^2
+
+```
+
+This one is way better. We selected as predictors, those variables with more correlations in our dataset.
+We are getting close to our best model, but we are not there yet.
+Let's see the **RMSE** (Root-Mean Square error)
+
+```{r}
+RMSE = sqrt(mean((prsm - test_reg1$totalyearlycompensation)^2))
+RMSE
+
+```
+
+
+# Using Caret
+
+
+```{r}
+LM2 = totalyearlycompensation ~ gender*((I(bonus^2) + I(basesalary^2) + I(stockgrantvalue^2) + I(yearsatcompany^2)))/exp(-yearsofexperience)
+lm_tuning = train(LM2, data = train_reg1, method = "lm", preProc=c('scale', 'center'),trControl = ctrl)
+
+lm_tuning
+
+```
+
+We are going to focus on the Rsquared value, which is the one that is going to tell us how well the model is. Basically it let us know the percentage of the variance that is explained in our variables. Or the relationship between them. In general, the higher the R^2, the better.
+
+```{r}
+test_res = data.frame(totalyearlycompensation = test_reg1$totalyearlycompensation)
+test_res$lm = predict(lm_tuning, test_reg1)
+postResample(pred = test_res$lm,  obs = test_res$totalyearlycompensation)
+
+
+```
+
+```{r}
+qplot(test_res$lm, test_res$totalyearlycompensation) + 
+  labs(title="Linear Regression", x="Predictions", y="Observations") +
+  geom_abline(intercept = 0, slope = 1, colour = "#2a9d8f") +
+  theme_bw()
+
+```
+
+We barely see any noise or misclassifications.
+
+# Regression with leap forward.
+We are going to use a non-linear model, we suspect R^2 will get worse as the dimension gets higher, but let us see.
+
+```{r}
+forw_tune2 = train(LM2, data = train_reg1, method = "leapForward", tuneGrid = expand.grid(nvmax = 3:8), trControl = ctrl)
+
+forw_tune2
+
+```
+
+```{r}
+plot(forw_tune2)
+```
+
+```{r}
+coef(forw_tune2$finalModel, forw_tune2$bestTune$nvmax)
+```
+
+As we can see, this is a pretty much robust model, the R^2s are all in the same range, stable. This gathers valuable information as it seems.
+
+# Ridge regression:
+The ridge regression model is a model tuning method that is used to analyse any data that suffers from multicollinearity. It performs L2 regularization.
+Least-squares are unbiased and variances large, which results in the predicted values being far from the actual ones.
+
+```{r}
+grid_hyper = expand.grid(lambda = seq(0, .1, .001))
+ridge_1 = train(LM2, data = train_reg1,
+                method='ridge',
+                preProc=c('scale','center'),
+                tuneGrid = grid_hyper,
+                trControl=ctrl)
+
+```
+
+```{r}
+plot(ridge_1)
+
+```
+
+```{r}
+ridge_1$bestTune
+```
+
+```{r}
+test_res$ridge_1 = predict(ridge_1, test_reg1)
+
+postResample(pred = test_res$ridge,  obs = test_res$totalyearlycompensation)
+```
+
+Ridge Regression solves the problem of overfitting, as regular regression fails to recognize the less important features and uses all of them, leading to overfitting. It also adds a slight bias, so our result is not the best.
+
+# Lasso
+The Lasso selects variables for us in order to make our model more exact and interpretable. It uses shrinkage, which is where the data values are shrunk towards a central point, such as the mean. It encourages simple and sparse models (with fewer parameters). 
+
+```{r}
+grid_lasso = expand.grid(fraction = seq(.01, 1, length = 100))
+lasso_1 = train(LM2, data = train_reg1,
+                method='lasso',
+                preProc=c('scale','center'),
+                tuneGrid = grid_lasso,
+                trControl=ctrl)
+plot(lasso_1)
+```
+
+```{r}
+lasso_1$bestTune
+
+```
+
+R^2 and RMSE:
+```{r}
+test_res$lasso_1 = predict(lasso_1, test_reg1)
+postResample(pred = test_res$lasso_1,  obs = test_res$totalyearlycompensation)
+
+```
+
+
+# Elastic Net
+The elastic net normalizes the vector of coefficients of the norms L1 and L2.
+It overcomes the limitations of LASSO which uses a penalty function based on two parameters, alpha and lambda.
+
+```{r}
+grid_elnet = expand.grid(alpha = seq(0, .2, 0.01), lambda = seq(0, .1, 0.01))
+
+elnet_1 = train(LM2, data = train_reg1, method ='glmnet',preProc=c('scale','center'), tuneGrid = grid_elnet ,trControl=ctrl)
+elnet_1$bestTune
+
+```
+
+```{r}
+test_res$elnet_1 = predict(elnet_1, test_reg1)
+postResample(pred = test_res$elnet_1,  obs = test_res$totalyearlycompensation)
+```
+
+```{r}
+plot(elnet_1)
+
+```
+
+Basically the same results.
+
+# Conclusion:
+After all the homework and the supervised learning, I think I got a glimpse of what is regression and and modelling a bit more. This dataset, it seems, is quite linear and easy to predict and to fit into different models.
+Although I ran into some problems with the type of each variable depending on the model I was trying to work with, giving me unexpected problems but it is part of the fun of working with the data, sometimes you do not know what you are up against.
+Sometimes a dataset is less complicated than it seems.
+I think the most important part about this type of project is learning how to interpret your own work, which takes time. It is useless to make a beautiful plot with a lot of variables and really colorful if in reality, you do not know what it means. Sometimes even the smallest and simplest of plots can tell you the most information about the data. So interpreting models, getting to know the difference between regressions, has made me research and improve my skills even if it is the sligthest of changes.
+
+
